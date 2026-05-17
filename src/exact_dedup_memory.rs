@@ -172,14 +172,16 @@ pub fn exact_dedup_memory(
     hash_key: Option<String>,
     hash_bits: usize,
     annotate: Option<String>,
+    exclude_substring: String,
+    include_substring: String,
 ) -> Result<(), Error> {
     let start_main = Instant::now();
     println!("Starting exact deduplication");
 
     let (seen_docs, kept_docs) = match hash_bits {
-        64 => exact_dedup_impl::<u64>(input_dir, output_dir, text_key, hash_key, annotate).unwrap(),
+        64 => exact_dedup_impl::<u64>(input_dir, output_dir, text_key, hash_key, annotate, &exclude_substring, &include_substring).unwrap(),
         128 => {
-            exact_dedup_impl::<u128>(input_dir, output_dir, text_key, hash_key, annotate).unwrap()
+            exact_dedup_impl::<u128>(input_dir, output_dir, text_key, hash_key, annotate, &exclude_substring, &include_substring).unwrap()
         }
         _ => {
             return Err(anyhow!(
@@ -212,8 +214,28 @@ fn exact_dedup_impl<K: DocHash>(
     text_key: &String,
     hash_key: Option<String>,
     annotate: Option<String>,
+    exclude_substring: &str,
+    include_substring: &str,
 ) -> Result<(usize, usize), Error> {
-    let input_paths = expand_dirs(vec![input_dir.clone()], None).unwrap();
+    let raw_input_paths = expand_dirs(vec![input_dir.clone()], None).unwrap();
+    let n_before = raw_input_paths.len();
+    let input_paths: Vec<_> = raw_input_paths
+        .into_iter()
+        .filter(|p| {
+            let s = p.to_string_lossy();
+            (include_substring.is_empty() || s.contains(include_substring))
+                && (exclude_substring.is_empty() || !s.contains(exclude_substring))
+        })
+        .collect();
+    if !include_substring.is_empty() || !exclude_substring.is_empty() {
+        println!(
+            "Path filter: kept {} of {} (include={:?}, exclude={:?})",
+            input_paths.len(),
+            n_before,
+            include_substring,
+            exclude_substring
+        );
+    }
     let seen_docs = AtomicUsize::new(0);
     let kept_docs = AtomicUsize::new(0);
     let counter: DashMap<K, usize> = DashMap::new();
@@ -295,10 +317,32 @@ fn exact_dedup_file<K: DocHash>(
     let mut writer = create_writer(&output_filename).unwrap();
     let data = read_pathbuf(&p, true).unwrap();
     for line in data.lines() {
-        let line = line.unwrap();
+        // Tolerate truncated .jsonl.zst files (premature EOF mid-frame) and malformed
+        // JSON lines: log and either stop reading this file (read error) or skip the
+        // line (json/hash error). Avoids panicking the rayon worker and lets us salvage
+        // everything readable up to the truncation point.
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("[skip] read error in {}: {}", p.display(), e);
+                break;
+            }
+        };
         seen += 1;
-        let mut line_json: Value = serde_json::from_str(&line).unwrap();
-        let hash_val = get_hash_val::<K>(&line_json, text_key, hash_key).unwrap();
+        let mut line_json: Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[skip] json error in {}: {}", p.display(), e);
+                continue;
+            }
+        };
+        let hash_val = match get_hash_val::<K>(&line_json, text_key, hash_key) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[skip] hash error in {}: {}", p.display(), e);
+                continue;
+            }
+        };
         if let Some(annotate_key) = annotate {
             let count = counter.get(&hash_val).unwrap();
             let anno_data = json!({"hash": hash_val.to_json(),
