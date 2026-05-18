@@ -248,14 +248,28 @@ fn exact_dedup_impl<K: DocHash>(
     };
 
     let pbar = build_pbar(input_paths.len(), "Paths");
+    let read_err_files = AtomicUsize::new(0);
+    let json_err_lines = AtomicUsize::new(0);
+    let hash_err_lines = AtomicUsize::new(0);
     input_paths.into_par_iter().for_each(|p| {
         let output_filename = get_output_filename(&p, input_dir, output_dir).unwrap();
-        let (p_seen, p_kept) =
-            exact_dedup_file(p, output_filename, text_key, &hash_key, &counter, &annotate).unwrap();
+        let (p_seen, p_kept) = exact_dedup_file(
+            p, output_filename, text_key, &hash_key, &counter, &annotate,
+            &read_err_files, &json_err_lines, &hash_err_lines,
+        ).unwrap();
         seen_docs.fetch_add(p_seen, Ordering::Relaxed);
         kept_docs.fetch_add(p_kept, Ordering::Relaxed);
         pbar.inc(1);
     });
+    let read_err = read_err_files.into_inner();
+    let json_err = json_err_lines.into_inner();
+    let hash_err = hash_err_lines.into_inner();
+    if read_err + json_err + hash_err > 0 {
+        println!(
+            "Skipped: {} files with read errors, {} lines with JSON errors, {} lines with hash errors",
+            read_err, json_err, hash_err
+        );
+    }
 
     let kept_docs = if let Some(_annokey) = annotate {
         counter.len()
@@ -306,6 +320,9 @@ fn exact_dedup_file<K: DocHash>(
     hash_key: &Option<String>,
     counter: &DashMap<K, usize>,
     annotate: &Option<String>,
+    read_err_files: &AtomicUsize,
+    json_err_lines: &AtomicUsize,
+    hash_err_lines: &AtomicUsize,
 ) -> Result<(usize, usize), Error> {
     let mut seen = 0;
     let mut kept = if let Some(_anno) = annotate {
@@ -318,28 +335,27 @@ fn exact_dedup_file<K: DocHash>(
     let data = read_pathbuf(&p, true).unwrap();
     for line in data.lines() {
         // Tolerate truncated .jsonl.zst files (premature EOF mid-frame) and malformed
-        // JSON lines: log and either stop reading this file (read error) or skip the
-        // line (json/hash error). Avoids panicking the rayon worker and lets us salvage
-        // everything readable up to the truncation point.
+        // JSON lines: bump a counter and either stop reading this file (read error) or
+        // skip the line (json/hash error). Aggregate counts are printed by the caller.
         let line = match line {
             Ok(l) => l,
-            Err(e) => {
-                eprintln!("[skip] read error in {}: {}", p.display(), e);
+            Err(_) => {
+                read_err_files.fetch_add(1, Ordering::Relaxed);
                 break;
             }
         };
         seen += 1;
         let mut line_json: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
-            Err(e) => {
-                eprintln!("[skip] json error in {}: {}", p.display(), e);
+            Err(_) => {
+                json_err_lines.fetch_add(1, Ordering::Relaxed);
                 continue;
             }
         };
         let hash_val = match get_hash_val::<K>(&line_json, text_key, hash_key) {
             Ok(v) => v,
-            Err(e) => {
-                eprintln!("[skip] hash error in {}: {}", p.display(), e);
+            Err(_) => {
+                hash_err_lines.fetch_add(1, Ordering::Relaxed);
                 continue;
             }
         };
