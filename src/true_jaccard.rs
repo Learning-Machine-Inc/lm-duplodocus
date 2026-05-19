@@ -11,7 +11,8 @@ use std::time::Instant;
 use ahash::RandomState;
 use anyhow::{Error, Result};
 use dashmap::DashMap;
-use mj_io::{build_pbar, expand_dirs, read_pathbuf_to_mem, write_mem_to_pathbuf};
+use mj_io::{build_pbar, read_pathbuf_to_mem, write_mem_to_pathbuf};
+use crate::io_any::expand_dirs_any;
 use rayon::prelude::*;
 use regex::Regex;
 use serde_json::{json, Value as JSONValue};
@@ -76,7 +77,7 @@ pub fn true_jaccard(
     let tokenizer_name = config_obj.minhash_params.tokenizer;
     let tokenizer = OmniTokenizer::new(&tokenizer_name).unwrap();
     // Gather files into groups
-    let paths = expand_dirs(vec![input_dir.clone()], None).unwrap();
+    let paths = expand_dirs_any(vec![input_dir.clone()]).unwrap();
     let input_groups: Vec<Vec<PathBuf>> = if let Some(group_regex) = group_regex {
         let mut group_hash: HashMap<Option<String>, Vec<PathBuf>> = HashMap::new();
         let re = Regex::new(&group_regex).unwrap();

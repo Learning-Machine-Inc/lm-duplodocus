@@ -104,6 +104,7 @@ use crate::true_jaccard::true_jaccard;
 
 pub mod exact_dedup_disk;
 pub mod exact_dedup_memory;
+pub mod io_any;
 pub mod minhash_base;
 pub mod minhash_config;
 pub mod minhash_disk;

@@ -35,3 +35,5 @@ gjson = "0.8.1"
 smallvec = "1.15.1"
 sysinfo = "0.37.2"
 memmap2 = "0.9.9"
+arrow-json = "53"
+parquet = { version = "53", features = ["arrow", "zstd"] }

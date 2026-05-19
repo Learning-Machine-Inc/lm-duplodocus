@@ -31,7 +31,8 @@ use std::os::unix::fs::OpenOptionsExt;
 
 use anyhow::{Error, Result};
 use dashmap::DashMap;
-use mj_io::{expand_dirs, read_pathbuf_to_mem, write_mem_to_pathbuf};
+use mj_io::{read_pathbuf_to_mem, write_mem_to_pathbuf};
+use crate::io_any::expand_dirs_any;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::{Eq, PartialEq};
@@ -401,7 +402,7 @@ impl MinHashConfig {
         max_lines_per_path: usize,
     ) -> Result<Self, Error> {
         // First gather all files
-        let paths = expand_dirs(input.clone(), None).unwrap();
+        let paths = expand_dirs_any(input.clone()).unwrap();
         let num_paths = paths.len();
         let path_size = to_byte_size(num_paths);
         let line_size = to_byte_size(max_lines_per_path);

@@ -29,9 +29,10 @@ use anyhow::{Error, Result};
 use dashmap::DashMap;
 use glob::glob;
 use mj_io::{
-    build_pbar, create_writer, expand_dirs, get_output_filename, read_pathbuf, read_pathbuf_to_mem,
+    build_pbar, create_writer, expand_dirs, get_output_filename, read_pathbuf_to_mem,
     write_mem_to_pathbuf,
 };
+use crate::io_any::{expand_dirs_any, read_any};
 use ndarray::Array1;
 use rand::Rng;
 use rand::RngCore;
@@ -113,7 +114,7 @@ impl FileMap {
     pub fn new(local_input: &PathBuf, remote_input: &Option<PathBuf>) -> Result<Self, Error> {
         // Implementation remains the same
         let input_vec = vec![local_input.clone()];
-        let paths = expand_dirs(input_vec.clone(), None).unwrap();
+        let paths = expand_dirs_any(input_vec.clone()).unwrap();
 
         let stripped_paths: Vec<PathBuf> = paths
             .iter()
@@ -396,7 +397,7 @@ fn process_path(
     content_key: &str,
 ) -> Result<usize, Error> {
     // Setup things: load data, build tokenizer, etc
-    let data = read_pathbuf(path, true).unwrap();
+    let data = read_any(path, true).unwrap();
     // let mut buffer = Vec::new();
     // data.read_to_end(&mut buffer).unwrap();
     // println!("READ DATA {:?}", buffer);

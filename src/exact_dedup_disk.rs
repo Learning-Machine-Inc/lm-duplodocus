@@ -54,7 +54,8 @@ use crate::storage::GenWriter;
 use crate::utils::{json_get, json_set};
 use anyhow::{anyhow, Error, Result};
 use dashmap::DashMap;
-use mj_io::{build_pbar, create_writer, expand_dirs, get_output_filename, read_pathbuf};
+use mj_io::{build_pbar, create_writer, expand_dirs, get_output_filename};
+use crate::io_any::{expand_dirs_any, read_any};
 use rand::Rng;
 use rayon::prelude::*;
 use regex::Regex;
@@ -162,7 +163,7 @@ pub fn exact_dedup_disk_group(
     let docs_seen = AtomicUsize::new(0);
     println!("Starting grouping operation...");
 
-    let mut input_paths = expand_dirs(vec![input_dir.to_path_buf()], None).unwrap();
+    let mut input_paths = expand_dirs_any(vec![input_dir.to_path_buf()]).unwrap();
     input_paths.sort();
     let mut hasher = DefaultHasher::new();
     for path in &input_paths {
@@ -215,7 +216,7 @@ pub fn group_docs(
     gen_writer: &GenWriter,
     num_bins: usize,
 ) -> Result<usize, Error> {
-    let contents = read_pathbuf(p, true).unwrap();
+    let contents = read_any(p, true).unwrap();
     let mut num_docs = 0;
     for line in contents.lines() {
         let mut line = line.unwrap().into_bytes();
@@ -420,7 +421,7 @@ fn prune_group(
     let counter: DashMap<Value, usize> = DashMap::new(); // Maps hash key -> usize
     if let Some(_anno) = annotate_key {
         vlist.par_iter().for_each(|p| {
-            let contents = read_pathbuf(p, true).unwrap();
+            let contents = read_any(p, true).unwrap();
             for line in contents.lines() {
                 let line = line.unwrap();
                 let line_json = serde_json::from_str(&line).unwrap();
@@ -433,7 +434,7 @@ fn prune_group(
         })
     }
     vlist.par_iter().for_each(|p| {
-        let contents = read_pathbuf(p, true).unwrap();
+        let contents = read_any(p, true).unwrap();
         let output_filename = get_output_filename(&p, storage_dir, output_dir).unwrap();
         let mut writer = create_writer(&output_filename).unwrap();
         for line in contents.lines() {

@@ -26,8 +26,9 @@ use crate::table_generic::DynamicSuffixTable;
 use anyhow::{Error, Result};
 use gjson;
 use mj_io::{
-    build_pbar, get_output_filename, read_pathbuf, read_pathbuf_to_mem, write_mem_to_pathbuf,
+    build_pbar, get_output_filename, read_pathbuf_to_mem, write_mem_to_pathbuf,
 };
+use crate::io_any::read_any;
 use rayon;
 use rayon::prelude::*;
 use std::path::PathBuf;
@@ -281,7 +282,7 @@ pub fn load_data_docs(
         .par_iter()
         .flat_map(|(p, idx)| {
             let mut sub_docs: Vec<(usize, usize, String)> = Vec::new();
-            let contents = read_pathbuf(&(local_input.clone().join(p)), true).unwrap();
+            let contents = read_any(&(local_input.clone().join(p)), true).unwrap();
             for (line_num, line) in contents.lines().enumerate() {
                 let line = line.unwrap();
                 let value = gjson::get(&line, &text_key).str().to_string();

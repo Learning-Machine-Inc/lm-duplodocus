@@ -36,7 +36,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use xxhash_rust::xxh3::{xxh3_128, xxh3_64};
 
 use crate::utils::{json_get, json_set};
-use mj_io::{build_pbar, create_writer, expand_dirs, get_output_filename, read_pathbuf};
+use mj_io::{build_pbar, create_writer, get_output_filename};
+use crate::io_any::{expand_dirs_any, read_any};
 use std::time::Instant;
 /*
 EXACT DEDUPLICATION MODULE
@@ -217,7 +218,7 @@ fn exact_dedup_impl<K: DocHash>(
     exclude_substring: &str,
     include_substring: &str,
 ) -> Result<(usize, usize), Error> {
-    let raw_input_paths = expand_dirs(vec![input_dir.clone()], None).unwrap();
+    let raw_input_paths = expand_dirs_any(vec![input_dir.clone()]).unwrap();
     let n_before = raw_input_paths.len();
     let input_paths: Vec<_> = raw_input_paths
         .into_iter()
@@ -289,7 +290,7 @@ fn build_out_counter<K: DocHash>(
     hash_key: &Option<String>,
     counter: &DashMap<K, usize>,
 ) -> Result<(), Error> {
-    let data = read_pathbuf(p, true).unwrap();
+    let data = read_any(p, true).unwrap();
     for line in data.lines() {
         let line = line.unwrap();
         let line_json: Value = serde_json::from_str(&line).unwrap();
@@ -332,7 +333,7 @@ fn exact_dedup_file<K: DocHash>(
     };
 
     let mut writer = create_writer(&output_filename).unwrap();
-    let data = read_pathbuf(&p, true).unwrap();
+    let data = read_any(&p, true).unwrap();
     for line in data.lines() {
         // Tolerate truncated .jsonl.zst files (premature EOF mid-frame) and malformed
         // JSON lines: bump a counter and either stop reading this file (read error) or
