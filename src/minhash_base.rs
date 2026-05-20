@@ -29,10 +29,10 @@ use anyhow::{Error, Result};
 use dashmap::DashMap;
 use glob::glob;
 use mj_io::{
-    build_pbar, create_writer, expand_dirs, get_output_filename, read_pathbuf_to_mem,
+    build_pbar, create_writer, expand_dirs, read_pathbuf_to_mem,
     write_mem_to_pathbuf,
 };
-use crate::io_any::{expand_dirs_any, read_any};
+use crate::io_any::{expand_dirs_any, get_output_filename_jsonl_zst, read_any};
 use ndarray::Array1;
 use rand::Rng;
 use rand::RngCore;
@@ -1225,7 +1225,7 @@ fn clean_path(
     annotate_key: &String,
     do_remove: bool,
 ) -> Result<(usize, usize), Error> {
-    let output_filename = get_output_filename(input_path, input_dir, output_dir).unwrap();
+    let output_filename = get_output_filename_jsonl_zst(input_path, input_dir, output_dir).unwrap();
     let contents = read_pathbuf_to_mem(input_path).unwrap();
 
     // Line_num -> (cc_id, cc_size, cc_idx)

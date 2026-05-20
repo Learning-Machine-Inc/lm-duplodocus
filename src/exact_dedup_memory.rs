@@ -36,8 +36,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use xxhash_rust::xxh3::{xxh3_128, xxh3_64};
 
 use crate::utils::{json_get, json_set};
-use mj_io::{build_pbar, create_writer, get_output_filename};
-use crate::io_any::{expand_dirs_any, read_any};
+use mj_io::{build_pbar, create_writer};
+use crate::io_any::{expand_dirs_any, get_output_filename_jsonl_zst, read_any};
 use std::time::Instant;
 /*
 EXACT DEDUPLICATION MODULE
@@ -253,7 +253,7 @@ fn exact_dedup_impl<K: DocHash>(
     let json_err_lines = AtomicUsize::new(0);
     let hash_err_lines = AtomicUsize::new(0);
     input_paths.into_par_iter().for_each(|p| {
-        let output_filename = get_output_filename(&p, input_dir, output_dir).unwrap();
+        let output_filename = get_output_filename_jsonl_zst(&p, input_dir, output_dir).unwrap();
         let (p_seen, p_kept) = exact_dedup_file(
             p, output_filename, text_key, &hash_key, &counter, &annotate,
             &read_err_files, &json_err_lines, &hash_err_lines,

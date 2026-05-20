@@ -26,9 +26,9 @@ use crate::table_generic::DynamicSuffixTable;
 use anyhow::{Error, Result};
 use gjson;
 use mj_io::{
-    build_pbar, get_output_filename, read_pathbuf_to_mem, write_mem_to_pathbuf,
+    build_pbar, read_pathbuf_to_mem, write_mem_to_pathbuf,
 };
-use crate::io_any::read_any;
+use crate::io_any::{get_output_filename_jsonl_zst, read_any};
 use rayon;
 use rayon::prelude::*;
 use std::path::PathBuf;
@@ -1137,7 +1137,7 @@ pub fn sa_annotate_files(
     extant_idxs.into_par_iter().for_each(|(p, idx)| {
         let anno_group = anno_groups.entry(*idx).or_default();
         let input_path = input_dir.clone().join(&p);
-        let output_path = get_output_filename(&input_path, input_dir, output_dir).unwrap();
+        let output_path = get_output_filename_jsonl_zst(&input_path, input_dir, output_dir).unwrap();
         let (p_anno_docs, p_anno_bytes) = sa_annotate_path(input_path, &anno_group, &output_path, annotate_key, &text_key).unwrap();
         anno_docs.fetch_add(p_anno_docs, Ordering::SeqCst);
         anno_bytes.fetch_add(p_anno_bytes, Ordering::SeqCst);

@@ -54,8 +54,8 @@ use crate::storage::GenWriter;
 use crate::utils::{json_get, json_set};
 use anyhow::{anyhow, Error, Result};
 use dashmap::DashMap;
-use mj_io::{build_pbar, create_writer, expand_dirs, get_output_filename};
-use crate::io_any::{expand_dirs_any, read_any};
+use mj_io::{build_pbar, create_writer, expand_dirs};
+use crate::io_any::{expand_dirs_any, get_output_filename_jsonl_zst, read_any};
 use rand::Rng;
 use rayon::prelude::*;
 use regex::Regex;
@@ -435,7 +435,7 @@ fn prune_group(
     }
     vlist.par_iter().for_each(|p| {
         let contents = read_any(p, true).unwrap();
-        let output_filename = get_output_filename(&p, storage_dir, output_dir).unwrap();
+        let output_filename = get_output_filename_jsonl_zst(&p, storage_dir, output_dir).unwrap();
         let mut writer = create_writer(&output_filename).unwrap();
         for line in contents.lines() {
             let line = line.unwrap();

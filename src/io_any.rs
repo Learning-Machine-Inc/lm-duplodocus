@@ -59,6 +59,46 @@ pub fn expand_dirs_any(roots: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     mj_io::expand_dirs(roots, Some(ACCEPTED_EXTS))
 }
 
+/// Like `mj_io::get_output_filename`, but normalizes the output filename to
+/// always end in `.jsonl.zst` regardless of the input extension.
+///
+/// duplodocus always writes JSON-serialized rows via `write_line`, so the
+/// output is always JSONL in spirit. Forcing `.jsonl.zst` ensures
+/// `mj_io::create_writer` picks the zstd encoder branch and that downstream
+/// tools can rely on a consistent output format — instead of inheriting
+/// whatever extension the input happened to use (e.g. `.parquet`).
+pub fn get_output_filename_jsonl_zst(
+    input_path: &Path,
+    config_input_dir: &Path,
+    config_output_dir: &Path,
+) -> Result<PathBuf> {
+    let rel = input_path
+        .strip_prefix(config_input_dir)
+        .with_context(|| {
+            format!(
+                "{} is not under {}",
+                input_path.display(),
+                config_input_dir.display(),
+            )
+        })?;
+    let rel_str = rel.to_string_lossy();
+    // Strip the longest matching input extension; fall back to the bare name.
+    const INPUT_EXTS: &[&str] = &[
+        ".jsonl.zst",
+        ".jsonl.zstd",
+        ".jsonl.gz",
+        ".json.zst",
+        ".json.gz",
+        ".jsonl",
+        ".parquet",
+    ];
+    let stem: &str = INPUT_EXTS
+        .iter()
+        .find_map(|ext| rel_str.strip_suffix(ext))
+        .unwrap_or(rel_str.as_ref());
+    Ok(config_output_dir.join(format!("{stem}.jsonl.zst")))
+}
+
 /// Streams a parquet file's rows as newline-delimited JSON via `Read`.
 ///
 /// Pulls one `RecordBatch` at a time from the parquet reader, encodes it to
