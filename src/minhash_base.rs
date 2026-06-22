@@ -469,12 +469,15 @@ fn clean_text(text: &str) -> String {
     // Convert the document to lowercase
     let mut text = text.to_lowercase();
 
-    // Remove punctuation
+    // Replace punctuation with space (not delete) to keep word boundaries for shingling.
     let punctuation: &[_] = &[
         '!', '"', '#', '$', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '<',
         '=', '>', '?', '@', '[', '\\', ']', '^', '_', '`', '{', '|', '}', '~',
     ];
-    text.retain(|c| !punctuation.contains(&c));
+    text = text
+        .chars()
+        .map(|c| if punctuation.contains(&c) { ' ' } else { c })
+        .collect();
 
     // Replace multiple whitespace characters with a single space
     let re = Regex::new(r"\s+").unwrap();
@@ -777,8 +780,9 @@ fn save_band_group(
     path_size: usize,
     line_size: usize,
 ) -> Result<(), Error> {
-    let max_path = IntValueEnum::new(1 << path_size - 1, path_size);
-    let max_line = IntValueEnum::new(1 << line_size - 1, line_size);
+    // group separator = all-ones for the byte width (larger than any real id)
+    let max_path = IntValueEnum::new((1usize << (8 * path_size)) - 1, path_size);
+    let max_line = IntValueEnum::new((1usize << (8 * line_size)) - 1, line_size);
     let group_end = [max_path.as_bytes(), max_line.as_bytes()].concat();
 
     if let Some(parent_dir) = output_file.parent() {
@@ -943,8 +947,9 @@ fn add_edge_file_to_uf(
         .unwrap()
         .into_inner()
         .into_inner();
-    let max_path = IntValueEnum::new(1 << path_size - 1, path_size).as_uint::<usize>();
-    let max_line = IntValueEnum::new(1 << line_size - 1, line_size).as_uint::<usize>();
+    // group separator (matches save_band_group)
+    let max_path = IntValueEnum::new((1usize << (8 * path_size)) - 1, path_size).as_uint::<usize>();
+    let max_line = IntValueEnum::new((1usize << (8 * line_size)) - 1, line_size).as_uint::<usize>();
     let group_end_id = pair2docid((max_path, max_line), line_size);
     let mut last_id = group_end_id;
 
