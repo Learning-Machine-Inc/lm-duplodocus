@@ -309,6 +309,7 @@ pub fn mh_clean_files(
     annotate_key: Option<String>,
     delete_while_cleaning: Option<bool>,
     remove_duplicates: Option<bool>,
+    text_key: Option<String>,
     cleanup_storage: bool,
 ) -> Result<(), Error> {
     let overrides = ConfigOverrides {
@@ -336,6 +337,7 @@ pub fn mh_clean_files(
         output_dir,
         path_chunk,
         num_path_chunks,
+        text_key.as_deref(),
     )
     .unwrap();
     if cleanup_storage {

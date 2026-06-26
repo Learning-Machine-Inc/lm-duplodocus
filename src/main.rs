@@ -637,6 +637,10 @@ enum Commands {
         #[arg(long)]
         remove_duplicates: Option<bool>,
 
+        /// Content field; if set, docs whose value is null/missing/non-string are dropped
+        #[arg(long)]
+        text_key: Option<String>,
+
         /// Delete storage directory after completion
         /// WARNING: Only set true on final worker to avoid race conditions
         #[arg(long, default_value_t = false)]
@@ -995,6 +999,7 @@ fn main() {
             annotate_key,
             delete_while_cleaning,
             remove_duplicates,
+            text_key,
             cleanup_storage,
         } => mh_clean_files(
             input_dir,
@@ -1007,6 +1012,7 @@ fn main() {
             annotate_key.clone(),
             *delete_while_cleaning,
             *remove_duplicates,
+            text_key.clone(),
             *cleanup_storage,
         ),
 

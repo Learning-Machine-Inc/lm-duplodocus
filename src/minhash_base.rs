@@ -329,6 +329,7 @@ pub fn hash_only(
     let hash_pbar = build_pbar(this_chunk.len(), "Paths");
 
     this_chunk.par_iter().for_each(|(path, path_id)| {
+        let t0 = Instant::now();
         let docs_hashed = process_path(
             &local_input.join(path),
             &band_seeds,
@@ -344,6 +345,17 @@ pub fn hash_only(
             content_key,
         )
         .unwrap();
+        // PROFILING: per-file timing — rayon worker, path_id, doc count, wall secs, file.
+        let secs = t0.elapsed().as_secs_f64();
+        println!(
+            "[hash-prof] worker={:?} path_id={} docs={} secs={:.1} docs_per_s={:.0} file={:?}",
+            rayon::current_thread_index(),
+            path_id,
+            docs_hashed,
+            secs,
+            if secs > 0.0 { docs_hashed as f64 / secs } else { 0.0 },
+            path
+        );
         total_docs_hashed.fetch_add(docs_hashed, Ordering::SeqCst);
         hash_pbar.inc(1);
     });
@@ -1147,6 +1159,7 @@ pub fn clean_files(
     output_dir: &PathBuf,
     path_chunk: usize,
     num_path_chunks: usize,
+    content_key: Option<&str>,
 ) -> Result<(), Error> {
     println!("Starting UF-based pruning...");
     let start_main = Instant::now();
@@ -1186,6 +1199,7 @@ pub fn clean_files(
                 output_config_obj.annotate,
                 &output_config_obj.annotate_key,
                 output_config_obj.remove_duplicates,
+                content_key,
             )
             .unwrap();
             if output_config_obj.delete_while_cleaning {
@@ -1227,6 +1241,7 @@ fn clean_path(
     annotate: bool,
     annotate_key: &String,
     do_remove: bool,
+    content_key: Option<&str>,
 ) -> Result<(usize, usize), Error> {
     let output_filename = get_output_filename(input_path, input_dir, output_dir).unwrap();
     let contents = read_pathbuf_to_mem(input_path).unwrap();
@@ -1250,6 +1265,14 @@ fn clean_path(
     for (line_num, line) in contents.lines().enumerate() {
         lines_seen += 1;
         let line = line?;
+        // drop docs whose content_key is null/missing/non-string (when a content_key is given)
+        if let Some(ck) = content_key {
+            let lj: JSONValue = serde_json::from_str(&line).unwrap();
+            if json_get(&lj, ck).and_then(|v| v.as_str()).is_none() {
+                lines_removed += 1;
+                continue;
+            }
+        }
         if anno_lookup.contains_key(&line_num) {
             // Need to either annotate and write or just remove
             let (cc_id, cc_size, cc_idx) = *anno_lookup.get(&line_num).unwrap();
