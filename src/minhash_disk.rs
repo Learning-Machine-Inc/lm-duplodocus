@@ -12,7 +12,7 @@
 //! 4. **Build Union-Find** (`mh_build_uf`): Identify connected components
 //! 5. **Clean Files** (`mh_clean_files`): Apply deduplication
 
-use crate::minhash_base::{build_uf, clean_files, gather_edges, hash_only, FileMap};
+use crate::minhash_base::{build_uf, clean_files, gather_edges, hash_only, tag_files, FileMap};
 use crate::minhash_config::{
     Config, ConfigOverrides, EngOverrides, MinHashOverrides, OutputOverrides,
 };
@@ -343,4 +343,43 @@ pub fn mh_clean_files(
     }
 
     Ok(())
+}
+
+/// **Stage 5 (tag variant)**: Instead of cleaning, emit a compact `{<id_key>: id, cluster_id}` record
+/// per doc for every doc in the path-chunk (the interface `--emit tag` path). Reuses the Stage-4
+/// clean metadata; singletons absent from it get their own component id. `id_key` is the doc id
+/// field (--id_col) and is also the output key. `max_lines_per_path` MUST match the value used in
+/// Stage 4 (it sets the id namespace for singletons).
+pub fn mh_tag_files(
+    input_dir: &PathBuf,
+    storage_dir: &PathBuf,
+    output_dir: &PathBuf,
+    path_chunk: usize,
+    num_path_chunks: usize,
+    config: &Option<PathBuf>,
+    max_lines_per_path: Option<usize>,
+    id_key: &String,
+) -> Result<(), Error> {
+    let overrides = ConfigOverrides {
+        minhash_params: MinHashOverrides::default(),
+        eng_params: EngOverrides {
+            num_docs: None,
+            max_lines_per_path: max_lines_per_path,
+            num_sig_chunks: None,
+        },
+        output_params: OutputOverrides::default(),
+    };
+    let config_obj = Config::load_with_overrides(config.clone(), overrides).unwrap();
+
+    let file_map = FileMap::load(&get_file_map_loc(storage_dir)).unwrap();
+    tag_files(
+        &config_obj,
+        &file_map,
+        input_dir,
+        storage_dir,
+        output_dir,
+        path_chunk,
+        num_path_chunks,
+        id_key,
+    )
 }

@@ -96,7 +96,7 @@ use std::path::PathBuf;
 use crate::exact_dedup_disk::{exact_dedup_disk_group, exact_dedup_disk_prune};
 use crate::exact_dedup_memory::exact_dedup_memory;
 use crate::minhash_disk::{
-    mh_build_file_map, mh_build_uf, mh_clean_files, mh_gather_edges, mh_hash_docs,
+    mh_build_file_map, mh_build_uf, mh_clean_files, mh_gather_edges, mh_hash_docs, mh_tag_files,
 };
 use crate::minhash_memory::minhash_memory;
 use crate::sa_base::{get_matches_serial, make_sa_tables_cmd, merge_matches, sa_annotate_files, get_matches_parallel};
@@ -643,6 +643,54 @@ enum Commands {
         cleanup_storage: bool,
     },
 
+    /// MinHash step 5 (tag variant): emit {<id-key>: id, cluster_id} per doc instead of cleaning.
+    ///
+    /// # Example
+    /// ```text
+    ///   cargo run --release --  mh-tag-files \
+    ///     --input-dir /data/documents \
+    ///     --storage-dir /shared/work \
+    ///     --output-dir /data/tags \
+    ///     --path-chunk 0 \
+    ///     --num-path-chunks 10 \
+    ///     --max-lines-per-path 200000 \
+    ///     --id-key "id"
+    /// ```
+    #[clap(arg_required_else_help = true)]
+    MhTagFiles {
+        /// Directory containing original input files
+        #[arg(required = true, long)]
+        input_dir: PathBuf,
+
+        /// Working directory containing cleaning metadata (from step 4)
+        #[arg(required = true, long)]
+        storage_dir: PathBuf,
+
+        /// Directory where {original_id, cluster_id} files will be written
+        #[arg(required = true, long)]
+        output_dir: PathBuf,
+
+        /// This worker's chunk ID (0 to num-path-chunks - 1)
+        #[arg(required = true, long)]
+        path_chunk: usize,
+
+        /// Total number of chunks (must match step 4)
+        #[arg(required = true, long)]
+        num_path_chunks: usize,
+
+        /// Optional: Path to YAML configuration file
+        #[arg(long)]
+        config: Option<PathBuf>,
+
+        /// Max lines per file — MUST match step 4 (sets the singleton id namespace)
+        #[arg(long)]
+        max_lines_per_path: Option<usize>,
+
+        /// JSON key holding each doc's id (the interface --id_col); also used as the output key
+        #[arg(required = true, long)]
+        id_key: String,
+    },
+
     #[clap(arg_required_else_help = true)]
     TrueJaccard {
         /// Directory containing annotated minhash data
@@ -960,6 +1008,26 @@ fn main() {
             *delete_while_cleaning,
             *remove_duplicates,
             *cleanup_storage,
+        ),
+
+        Commands::MhTagFiles {
+            input_dir,
+            storage_dir,
+            output_dir,
+            path_chunk,
+            num_path_chunks,
+            config,
+            max_lines_per_path,
+            id_key,
+        } => mh_tag_files(
+            input_dir,
+            storage_dir,
+            output_dir,
+            *path_chunk,
+            *num_path_chunks,
+            config,
+            *max_lines_per_path,
+            id_key,
         ),
 
         Commands::TrueJaccard {

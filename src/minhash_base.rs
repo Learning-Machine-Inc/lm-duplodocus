@@ -23,7 +23,7 @@ use crate::minhash_config::Config;
 use crate::storage::GenWriter;
 use crate::storage::{compute_sig_size, to_byte_size, IntValueEnum, SignatureWriter};
 use crate::uf_rush2::{parent as uf_parent, UFRush};
-use crate::utils::json_set;
+use crate::utils::{json_get, json_set};
 use ahash::RandomState;
 use anyhow::{Error, Result};
 use dashmap::DashMap;
@@ -1281,6 +1281,107 @@ fn clean_path(
     }
 
     Ok((lines_seen, lines_removed))
+}
+
+/// Tag mode (interface `--emit tag`): instead of removing or annotating docs, emit one compact
+/// `{<id_key>: id, cluster_id}` record per doc for EVERY doc in the path-chunk. Docs present in the
+/// clean metadata get their `cc_id`; docs absent from it (singletons — never had a near-dup edge,
+/// so build_uf dropped them) get their own `pair2docid` as `cluster_id` (a size-1 component is its
+/// own root, same id namespace as the real cc_ids). `id_key` is the doc's id field (--id_col); the
+/// `line_size` used for singleton ids MUST match build_uf's (= to_byte_size(max_lines_per_path)).
+pub fn tag_files(
+    config_obj: &Config,
+    file_map: &FileMap,
+    input_dir: &PathBuf,
+    storage_dir: &PathBuf,
+    output_dir: &PathBuf,
+    path_chunk: usize,
+    num_path_chunks: usize,
+    id_key: &String,
+) -> Result<(), Error> {
+    println!("Starting UF-based tagging...");
+    let start_main = Instant::now();
+    let line_size = to_byte_size(config_obj.eng_params.max_lines_per_path);
+
+    let metadata_dir = storage_dir.clone().join("clean");
+    let path_chunk_files = file_map.get_path_chunk(path_chunk, num_path_chunks);
+    let path_chunk_files: Vec<(PathBuf, usize)> = path_chunk_files
+        .into_par_iter()
+        .filter(|(path, _path_id)| input_dir.join(path).exists())
+        .collect();
+
+    let metadata_file = GenWriter::get_filename(&metadata_dir, path_chunk, 0, "clean", &None);
+    let metadata = parse_clean_metadata_file(&metadata_file).unwrap();
+
+    let documents_seen = AtomicUsize::new(0);
+    let pbar = build_pbar(path_chunk_files.len(), "Files to tag");
+    path_chunk_files.into_par_iter().for_each(|(path, path_id)| {
+        let line_data = metadata.remove(&path_id).unwrap_or_default().1;
+        let lines_seen = tag_path(
+            &input_dir.clone().join(&path),
+            line_data,
+            path_id,
+            line_size,
+            &input_dir,
+            &output_dir,
+            id_key,
+        )
+        .unwrap();
+        documents_seen.fetch_add(lines_seen, Ordering::Relaxed);
+        pbar.inc(1);
+    });
+
+    println!("Saw {:?} docs", documents_seen.into_inner());
+    println!(
+        "Tagged all files in {:?} secs",
+        start_main.elapsed().as_secs()
+    );
+    Ok(())
+}
+
+/// Tags a single file: writes one `{<id_key>: id, cluster_id}` line per input doc.
+///
+/// # Returns
+/// `lines_seen` for statistics.
+fn tag_path(
+    input_path: &PathBuf,
+    line_data: Vec<(usize, usize, usize, usize)>,
+    path_id: usize,
+    line_size: usize,
+    input_dir: &PathBuf,
+    output_dir: &PathBuf,
+    id_key: &String,
+) -> Result<usize, Error> {
+    let output_filename = get_output_filename(input_path, input_dir, output_dir).unwrap();
+    let contents = read_pathbuf_to_mem(input_path).unwrap();
+
+    // line_num -> cc_id  (only docs that were in a >=2 component appear in the metadata)
+    let cc_lookup: HashMap<usize, usize> = line_data
+        .into_iter()
+        .map(|(line_num, cc_id, _cc_size, _cc_idx)| (line_num, cc_id))
+        .collect();
+
+    let mut lines_seen = 0;
+    let mut writer = create_writer(&output_filename).unwrap();
+    for (line_num, line) in contents.lines().enumerate() {
+        lines_seen += 1;
+        let line = line?;
+        let line_json: JSONValue = serde_json::from_str(&line).unwrap();
+        let id_val = json_get(&line_json, id_key).cloned().unwrap_or(JSONValue::Null);
+        // singleton (not in metadata) -> its own size-1 component: cluster_id = pair2docid
+        let cluster_id = match cc_lookup.get(&line_num) {
+            Some(&cc_id) => cc_id,
+            None => pair2docid((path_id, line_num), line_size),
+        };
+        // key the id by its source name (--id_col), so the output echoes the caller's id field
+        let mut out = serde_json::Map::new();
+        out.insert(id_key.clone(), id_val);
+        out.insert("cluster_id".to_string(), json!(cluster_id));
+        writer
+            .write_line(&serde_json::to_vec(&JSONValue::Object(out)).unwrap())
+            .unwrap();
+    }
+    Ok(lines_seen)
 }
 
 /// Parses a cleaning metadata file into a map from path_id to duplicate information.
