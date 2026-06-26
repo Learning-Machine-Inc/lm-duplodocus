@@ -58,6 +58,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::panic::catch_unwind;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 use std::time::Instant;
 use tiktoken_rs::{cl100k_base, p50k_base, CoreBPE};
 use unicode_segmentation::UnicodeSegmentation;
@@ -176,52 +177,69 @@ impl FileMap {
 =                            HASHING STUFF                             =
 ======================================================================*/
 
+/// Compiled `\W+` (Unicode non-word run) splitter for the `bigcode` tokenizer.
+/// Built once per process — mirrors Spark's `Pattern.compile("\\W", UNICODE_CHARACTER_CLASS)`.
+fn non_word_re() -> &'static Regex {
+    static NON_WORD: OnceLock<Regex> = OnceLock::new();
+    NON_WORD.get_or_init(|| Regex::new(r"\W+").unwrap())
+}
+
 /// Unified tokenizer supporting multiple tokenization strategies.
 ///
 /// Supported tokenizers:
 /// - `"cl100k"`: OpenAI's cl100k_base tokenizer
-/// - `"p50k"`: OpenAI's p50k_base tokenizer  
+/// - `"p50k"`: OpenAI's p50k_base tokenizer
+/// - `"bigcode"`: lowercase + Unicode `\W` word split (matches the Spark `bigcode` preprocessor; no BPE)
 /// - `"uniseg"`: Unicode word boundary segmentation
 /// - `"bytes"`: Character-level (byte-based)
 pub struct OmniTokenizer {
     tokenizer_name: String,
-    inner: CoreBPE,
+    /// Only the BPE tokenizers (`p50k`/`cl100k`) load a vocab; word/byte tokenizers leave this `None`.
+    inner: Option<CoreBPE>,
 }
 
 impl OmniTokenizer {
-    /// Creates a new tokenizer with the specified strategy.    
+    /// Creates a new tokenizer with the specified strategy.
     pub fn new(tokenizer_name: &str) -> Result<Self, Error> {
-        // Validate tokenizer name
-        match tokenizer_name {
-            "p50k" | "cl100k" | "uniseg" | "bytes" => {
-                // Valid tokenizer, proceed
-            }
+        // Only the BPE tokenizers load a (large) vocab — don't pay that for word/byte tokenizers.
+        let inner = match tokenizer_name {
+            "cl100k" => Some(cl100k_base().unwrap()),
+            "p50k" => Some(p50k_base().unwrap()),
+            "bigcode" | "uniseg" | "bytes" => None,
             _ => {
                 return Err(Error::msg(format!(
-                    "Unknown tokenizer: '{}'. Supported tokenizers are: p50k, cl100k, uniseg, bytes",
+                    "Unknown tokenizer: '{}'. Supported tokenizers are: p50k, cl100k, bigcode, uniseg, bytes",
                     tokenizer_name
                 )));
             }
-        }
+        };
+        Ok(OmniTokenizer {
+            tokenizer_name: tokenizer_name.to_string(),
+            inner,
+        })
+    }
 
-        if tokenizer_name == "cl100k" {
-            Ok(OmniTokenizer {
-                tokenizer_name: tokenizer_name.to_string(),
-                inner: cl100k_base().unwrap(),
-            })
-        } else {
-            Ok(OmniTokenizer {
-                tokenizer_name: tokenizer_name.to_string(),
-                inner: p50k_base().unwrap(),
-            })
-        }
+    /// Whether this tokenizer wants raw text (it does its own normalization) and so should bypass
+    /// `clean_text`. `bigcode` lowercases and splits on `\W` itself, making clean_text redundant.
+    pub fn skips_clean(&self) -> bool {
+        self.tokenizer_name == "bigcode"
     }
 
     /// Encodes text into a sequence of token IDs.
     pub fn encode(&self, text: &str) -> Vec<usize> {
         match self.tokenizer_name.as_str() {
-            "p50k" => self.inner.encode_with_special_tokens(text),
-            "cl100k" => self.inner.encode_with_special_tokens(text),
+            "p50k" => self.inner.as_ref().unwrap().encode_with_special_tokens(text),
+            "cl100k" => self.inner.as_ref().unwrap().encode_with_special_tokens(text),
+            // Spark `bigcode`: lowercase, split on \W (drop empties), hash each word to a token id.
+            "bigcode" => non_word_re()
+                .split(&text.to_lowercase())
+                .filter(|w| !w.is_empty())
+                .map(|w| {
+                    let mut hasher = DefaultHasher::new();
+                    w.hash(&mut hasher);
+                    hasher.finish() as usize
+                })
+                .collect(),
             "uniseg" => text
                 .split_word_bounds()
                 .map(|w| {
@@ -233,7 +251,7 @@ impl OmniTokenizer {
             "bytes" => text.bytes().map(|b| b as usize).collect(),
             _ => {
                 panic!(
-                    "Unknown tokenizer: '{}'. Supported tokenizers are p50k, cl100k, uniseg, bytes",
+                    "Unknown tokenizer: '{}'. Supported tokenizers are p50k, cl100k, bigcode, uniseg, bytes",
                     self.tokenizer_name
                 );
             }
@@ -468,10 +486,16 @@ fn process_path(
 }
 
 /// Preprocesses text by cleaning and tokenizing.
+///
+/// Tokenizers that normalize internally (e.g. `bigcode` lowercases + splits on `\W`) skip
+/// `clean_text` entirely — it would be redundant work with no effect on the resulting tokens.
 pub fn preprocess_text(text: &str, tokenizer: &OmniTokenizer) -> Vec<usize> {
-    let text = clean_text(text);
-    let tokens = tokenizer.encode(&text);
-    tokens
+    if tokenizer.skips_clean() {
+        tokenizer.encode(text)
+    } else {
+        let text = clean_text(text);
+        tokenizer.encode(&text)
+    }
 }
 
 fn clean_text(text: &str) -> String {
