@@ -198,6 +198,7 @@ pub fn minhash_memory(
         output_dir,
         0,
         1,
+        None,
     )
     .unwrap();
     if cleanup_storage {
