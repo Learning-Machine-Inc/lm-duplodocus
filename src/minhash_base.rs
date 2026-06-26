@@ -417,12 +417,11 @@ fn process_path(
             line_num
         ));
         let line_num = IntValueEnum::new(line_num, line_size);
-        let text = json_obj
-            .get(content_key)
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .to_string();
+        // tolerate docs whose content_key is missing or not a string (e.g. null): skip, don't panic
+        let Some(text) = json_obj.get(content_key).and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let text = text.to_string();
 
         let Ok(tokens) = catch_unwind(|| preprocess_text(&text, &tokenizer)) else {
             println!(
